@@ -1,0 +1,82 @@
+# OpenAPI delta: Performance & Safety (002)
+#
+# Additive changes only. Apply on top of
+# specs/001-employee-ai-search-platform/contracts/openapi.yaml
+
+paths:
+  /api/v1/documents/upload:
+    post:
+      description: |
+        Upload a document (PDF, DOCX, TXT, MD) for processing and indexing.
+        Duplicate content is detected with a SHA-256 hash: the same bytes are
+        rejected with 409 unless `replace=true`, which deletes the previous
+        document, its chunks and its vectors before creating the new one.
+        Replacing requires the original uploader or an administrator (403 otherwise).
+      parameters:
+        - name: replace
+          in: query
+          required: false
+          description: Replace the existing document with the same content hash (uploader or admin only).
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '409':
+          description: A document with the same content hash already exists
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [detail]
+                properties:
+                  detail:
+                    type: object
+                    required: [message, document_id]
+                    properties:
+                      message:
+                        type: string
+                        example: "Document already exists. Pass replace=true to replace it."
+                      document_id:
+                        type: string
+                        format: uuid
+                      filename:
+                        type: string
+                      status:
+                        type: string
+        '429':
+          description: Too many uploads from this client
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/search:
+    post:
+      responses:
+        '429':
+          description: Too many searches from this client
+
+  /api/v1/chat:
+    post:
+      responses:
+        '429':
+          description: Too many chat requests from this client
+
+components:
+  schemas:
+    DocumentResponse:
+      properties:
+        content_hash:
+          type: string
+          nullable: true
+          description: hex SHA-256 of the uploaded bytes (null for legacy rows)
+
+# Response headers (all endpoints)
+#
+# `X-Request-ID` — echoed when supplied (`[A-Za-z0-9._:-]{1,64}`), otherwise
+# generated. Always present on responses.

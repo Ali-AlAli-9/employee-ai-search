@@ -1,0 +1,964 @@
+openapi: 3.1.0
+info:
+  title: Employee AI Search Platform API
+  version: 1.0.0
+  description: |
+    API for the Employee AI Search Platform - a production-ready AI-powered search platform
+    with hybrid RAG and multi-agent answer synthesis.
+
+    Every response includes an `X-Request-ID` header (echoed when the client supplies a valid
+    id, otherwise generated) and application logs carry the same id. `/search`, `/chat` and
+    `/documents/upload` enforce a per-IP rate limit and return `429` with `Retry-After`.
+  contact:
+    name: API Support
+    email: support@example.com
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+  - url: https://employee-ai-search.onrender.com
+    description: Render production server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Documents
+    description: Document upload, listing, and management
+  - name: Search
+    description: Hybrid search and retrieval endpoints
+  - name: Chat
+    description: Multi-agent chat with streaming responses
+  - name: LLM
+    description: Visitor-supplied LLM credentials (bring your own key)
+  - name: Health
+    description: System health and readiness checks
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication. Admin keys allow document management.
+
+  schemas:
+    # ========== Common Schemas ==========
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Error description"
+        error_code:
+          type: string
+          example: "VALIDATION_ERROR"
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - detail
+
+    PaginationParams:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      required: []
+
+    PaginatedResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total_pages:
+          type: integer
+      required:
+        - items
+        - total
+        - page
+        - page_size
+        - total_pages
+
+    # ========== Document Schemas ==========
+    DocumentUploadResponse:
+      type: object
+      properties:
+        document_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        filename:
+          type: string
+          example: "company_policy.pdf"
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+          example: "pending"
+        message:
+          type: string
+          example: "Document uploaded successfully. Processing started."
+      required:
+        - document_id
+        - filename
+        - status
+
+    DocumentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        chunks_count:
+          type: integer
+        error_message:
+          type: string
+          nullable: true
+        uploaded_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        content_hash:
+          type: string
+          nullable: true
+          description: hex SHA-256 of the uploaded bytes (null for legacy rows)
+      required:
+        - id
+        - filename
+        - content_type
+        - size_bytes
+        - status
+        - chunks_count
+        - uploaded_by
+        - created_at
+        - updated_at
+
+    DocumentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentResponse'
+
+    # ========== Search Schemas ==========
+    SearchRequest:
+      type: object
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          example: "What is the vacation policy?"
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+        search_type:
+          type: string
+          enum: [hybrid, vector, keyword]
+          default: hybrid
+          description: "hybrid = vector + keyword with reranking"
+        filters:
+          type: object
+          properties:
+            document_ids:
+              type: array
+              items:
+                type: string
+                format: uuid
+            content_types:
+              type: array
+              items:
+                type: string
+            date_from:
+              type: string
+              format: date
+            date_to:
+              type: string
+              format: date
+          required: []
+        rerank:
+          type: boolean
+          default: true
+      required:
+        - query
+
+    ChunkWithScore:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        document_filename:
+          type: string
+        chunk_index:
+          type: integer
+        text:
+          type: string
+        score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        metadata:
+          type: object
+          properties:
+            page_number:
+              type: integer
+              nullable: true
+            section_title:
+              type: string
+              nullable: true
+            char_start:
+              type: integer
+            char_end:
+              type: integer
+          required: []
+
+    SearchResponse:
+      type: object
+      properties:
+        query:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChunkWithScore'
+        total_found:
+          type: integer
+        search_time_ms:
+          type: integer
+        search_type:
+          type: string
+      required:
+        - query
+        - results
+        - total_found
+        - search_time_ms
+        - search_type
+
+    # ========== Chat Schemas ==========
+    Citation:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        document_filename:
+          type: string
+        chunk_index:
+          type: integer
+        text_snippet:
+          type: string
+          maxLength: 500
+        page_number:
+          type: integer
+          nullable: true
+      required:
+        - chunk_id
+        - document_id
+        - document_filename
+        - chunk_index
+        - text_snippet
+
+    ChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+          default: []
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - role
+        - content
+        - timestamp
+
+    ChatRequest:
+      type: object
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          example: "What is the vacation policy and how does it apply to part-time employees?"
+        conversation_history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          maxItems: 10
+          default: []
+        stream:
+          type: boolean
+          default: true
+          description: "If true, returns Server-Sent Events stream"
+        search_params:
+          type: object
+          properties:
+            top_k:
+              type: integer
+              minimum: 1
+              maximum: 20
+              default: 10
+            search_type:
+              type: string
+              enum: [hybrid, vector, keyword]
+              default: hybrid
+            rerank:
+              type: boolean
+              default: true
+          required: []
+      required:
+        - message
+
+    ChatResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        query_id:
+          type: string
+          format: uuid
+        latency_ms:
+          type: integer
+      required:
+        - answer
+        - citations
+        - confidence
+        - query_id
+        - latency_ms
+
+    # SSE Event Types (for streaming chat)
+    ChatStreamEvent:
+      type: object
+      properties:
+        event:
+          type: string
+          enum: [token, citation, done, error]
+        data:
+          type: object
+          properties:
+            token:
+              type: string
+            citation:
+              $ref: '#/components/schemas/Citation'
+            answer:
+              type: string
+            confidence:
+              type: number
+              format: float
+            query_id:
+              type: string
+              format: uuid
+            error:
+              type: string
+      required:
+        - event
+        - data
+
+    ChatHistoryResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChatMessage'
+
+    # ========== Health Schemas ==========
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          properties:
+            database:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [healthy, unhealthy]
+                latency_ms:
+                  type: integer
+            qdrant:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [healthy, unhealthy]
+                collections:
+                  type: integer
+                points_count:
+                  type: integer
+            embedding_model:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [loaded, loading, error]
+                model_name:
+                  type: string
+            llm_api:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [reachable, unreachable]
+                provider:
+                  type: string
+      required:
+        - status
+        - version
+        - timestamp
+        - checks
+
+  responses:
+    UnauthorizedError:
+      description: Invalid or missing API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Invalid API key"
+            error_code: "UNAUTHORIZED"
+    TooManyRequestsError:
+      description: Per-IP rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Too many chat requests. Try again in 7s."
+    ForbiddenError:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Admin access required"
+            error_code: "FORBIDDEN"
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Document not found"
+            error_code: "NOT_FOUND"
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Invalid request parameters"
+            error_code: "VALIDATION_ERROR"
+
+paths:
+  # ========== Health Endpoints ==========
+  /api/v1/health:
+    get:
+      tags: [Health]
+      summary: Health check endpoint
+      description: Returns system health status including database, Qdrant, embedding model, and LLM API connectivity
+      operationId: healthCheck
+      security: []  # Public endpoint
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      description: Kubernetes-style readiness probe - returns 200 only if all critical dependencies are ready
+      operationId: readinessCheck
+      security: []
+      responses:
+        '200':
+          description: Service ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready:
+                    type: boolean
+                    example: true
+        '503':
+          description: Service not ready
+
+  # ========== Document Endpoints ==========
+  /api/v1/documents/upload:
+    post:
+      tags: [Documents]
+      summary: Upload a document for indexing
+      description: |
+        Upload a document (PDF, DOCX, TXT, MD) for processing and indexing.
+        The document is parsed, chunked, embedded, and written to the local `.npz`
+        store (or Qdrant when configured). Returns immediately with document_id;
+        processing happens asynchronously.
+
+        Any signed-in role (viewer or higher, guests included) may upload; deleting
+        remains admin-only.
+
+        Duplicate content is detected with a SHA-256 hash: the same bytes are rejected with
+        `409` unless `replace=true`, which removes the previous document, chunks and vectors
+        first.
+      operationId: uploadDocument
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: replace
+          in: query
+          required: false
+          description: |
+            Replace an existing document with the same SHA-256 content hash. Only the
+            uploader or an administrator may replace it (`403` otherwise).
+          schema:
+            type: boolean
+            default: false
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Document file (PDF, DOCX, TXT, MD)
+      responses:
+        '202':
+          description: Document accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '400':
+          description: Invalid file type or missing file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '413':
+          description: File too large (max 50MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: A document with identical content already exists
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [detail]
+                properties:
+                  detail:
+                    type: object
+                    required: [message, document_id]
+                    properties:
+                      message:
+                        type: string
+                        example: "A document with identical content already exists. Pass replace=true to replace it."
+                      document_id:
+                        type: string
+                        format: uuid
+                      filename:
+                        type: string
+                      status:
+                        type: string
+                        enum: [pending, processing, completed, failed]
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+
+  /api/v1/documents:
+    get:
+      tags: [Documents]
+      summary: List documents with pagination
+      description: Returns paginated list of documents with filtering options
+      operationId: listDocuments
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+        - name: content_type
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated document list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/documents/{document_id}:
+    get:
+      tags: [Documents]
+      summary: Get document details
+      operationId: getDocument
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags: [Documents]
+      summary: Delete a document and its chunks
+      description: Permanently removes document from PostgreSQL and all associated chunks from Qdrant
+      operationId: deleteDocument
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Document deleted successfully
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ========== Search Endpoints ==========
+  /api/v1/search:
+    post:
+      tags: [Search]
+      summary: Hybrid search across indexed documents
+      description: |
+        Performs hybrid search (vector + keyword) with optional cross-encoder reranking.
+        Returns relevant chunks with similarity scores.
+      operationId: searchDocuments
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Invalid search parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+
+  # ========== Chat Endpoints ==========
+  /api/v1/chat:
+    post:
+      tags: [Chat]
+      summary: Multi-agent chat with streaming response
+      description: |
+        Processes a user query through the multi-agent pipeline:
+        Researcher (query planning) → Retriever (hybrid search) → Synthesizer (answer generation).
+        Supports Server-Sent Events (SSE) for streaming token-by-token responses.
+      operationId: chatWithAgent
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: X-LLM-API-Key
+          in: header
+          required: false
+          description: |
+            Visitor-supplied provider key. Used for this request only; never persisted,
+            logged, traced or echoed. Omit it to use the server key (administrators only)
+            or the heuristic answerer.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: X-LLM-Model
+          in: header
+          required: false
+          description: Model id for the supplied key. Defaults to `LLM_MODEL`.
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9._:/@+-]{1,120}$'
+        - name: X-LLM-Base-URL
+          in: header
+          required: false
+          description: Must exactly match an entry in `LLM_ALLOWED_BASE_URLS`.
+          schema:
+            type: string
+            format: uri
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Streaming response (SSE) or complete response
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "SSE stream with events: token, citation, done, error"
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          description: Invalid request, malformed BYOK headers, or a disallowed base URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Bring-your-own-key is disabled on this deployment
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+
+  /api/v1/llm/verify:
+    post:
+      tags: [LLM]
+      summary: Check a visitor-supplied provider key
+      description: |
+        Calls the provider's `/models` route (or a single-token completion when that route
+        does not exist) and reports whether the credential works. The key is never echoed.
+      operationId: verifyLlmKey
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: X-LLM-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: X-LLM-Model
+          in: header
+          required: false
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9._:/@+-]{1,120}$'
+        - name: X-LLM-Base-URL
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uri
+      responses:
+        '200':
+          description: Key accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, provider, model, checked]
+                properties:
+                  ok:
+                    type: boolean
+                  provider:
+                    type: string
+                  model:
+                    type: string
+                  checked:
+                    type: string
+                    enum: [models, completion]
+                  models:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Malformed headers, disallowed base URL, or provider rejected the key
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Bring-your-own-key is disabled on this deployment
+        '429':
+          description: Provider quota reached, or the verify rate limit is exhausted
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+        '502':
+          description: Provider unreachable
+
+  /api/v1/chat/history:
+    get:
+      tags: [Chat]
+      summary: Get chat history for current user
+      operationId: getChatHistory
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Paginated chat history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatHistoryResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'

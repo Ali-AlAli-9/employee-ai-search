@@ -1,0 +1,431 @@
+# Agent Interfaces Contract
+# Defines the input/output schemas for each agent in the multi-agent pipeline
+
+version: "1.0"
+pipeline: "researcher -> retriever -> synthesizer"
+
+agents:
+  researcher:
+    name: "Researcher"
+    description: "Analyzes user query and plans search strategy with sub-queries"
+    model: "gpt-4o-mini"  # or claude-3-5-haiku, gemini-1.5-flash
+    temperature: 0.1
+    max_tokens: 1000
+    timeout_seconds: 30
+
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: "User's natural language query"
+        conversation_history:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [user, assistant]
+              content:
+                type: string
+          maxItems: 10
+          description: "Recent conversation context for follow-up queries"
+        user_context:
+          type: object
+          properties:
+            department:
+              type: string
+            role:
+              type: string
+            preferred_language:
+              type: string
+              enum: [en, ar]
+          description: "Optional user context for personalization"
+      required:
+        - query
+      additionalProperties: false
+
+    output_schema:
+      type: object
+      properties:
+        sub_queries:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 5
+          description: "Decomposed sub-queries for comprehensive coverage"
+        search_strategy:
+          type: string
+          enum: [hybrid, vector, keyword]
+          default: hybrid
+          description: "Recommended search approach"
+        filters:
+          type: object
+          properties:
+            document_ids:
+              type: array
+              items:
+                type: string
+                format: uuid
+            content_types:
+              type: array
+              items:
+                type: string
+            date_from:
+              type: string
+              format: date
+            date_to:
+              type: string
+              format: date
+            metadata_keys:
+              type: object
+              additionalProperties:
+                type: string
+          description: "Metadata filters to apply during retrieval"
+        reasoning:
+          type: string
+          description: "Internal reasoning for the search plan (not shown to user)"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: "Confidence in the search plan"
+      required:
+        - sub_queries
+        - search_strategy
+        - confidence
+      additionalProperties: false
+
+    system_prompt: |
+      You are a Research Agent for an enterprise AI search system. Your job is to analyze the user's query and create an optimal search plan.
+
+      Given a user query and optional conversation history, you must:
+      1. Decompose complex queries into 1-5 focused sub-queries
+      2. Recommend the best search strategy (hybrid/vector/keyword)
+      3. Identify any metadata filters that could improve relevance
+      4. Provide brief internal reasoning
+
+      Guidelines:
+      - For factual queries: prefer hybrid search with reranking
+      - For conceptual/broad queries: prefer vector search
+      - For exact term matching: prefer keyword search
+      - Consider conversation history for follow-up context
+      - Output ONLY valid JSON matching the schema
+
+  retriever:
+    name: "Retriever"
+    description: "Executes search queries against Qdrant with hybrid search and reranking"
+    model: "none"  # Deterministic retrieval, no LLM
+    timeout_seconds: 15
+
+    input_schema:
+      type: object
+      properties:
+        sub_queries:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 5
+        search_strategy:
+          type: string
+          enum: [hybrid, vector, keyword]
+          default: hybrid
+        filters:
+          type: object
+          properties:
+            document_ids:
+              type: array
+              items:
+                type: string
+                format: uuid
+            content_types:
+              type: array
+              items:
+                type: string
+            date_from:
+              type: string
+              format: date
+            date_to:
+              type: string
+              format: date
+            metadata_keys:
+              type: object
+              additionalProperties:
+                type: string
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+        rerank:
+          type: boolean
+          default: true
+        rerank_top_k:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: "Number of results after reranking"
+      required:
+        - sub_queries
+        - search_strategy
+        - top_k
+        - rerank
+      additionalProperties: false
+
+    output_schema:
+      type: object
+      properties:
+        chunks:
+          type: array
+          items:
+            type: object
+            properties:
+              chunk_id:
+                type: string
+                format: uuid
+              document_id:
+                type: string
+                format: uuid
+              document_filename:
+                type: string
+              chunk_index:
+                type: integer
+              text:
+                type: string
+              score:
+                type: number
+                minimum: 0
+                maximum: 1
+              original_score:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: "Score before reranking"
+              metadata:
+                type: object
+                properties:
+                  page_number:
+                    type: integer
+                    nullable: true
+                  section_title:
+                    type: string
+                    nullable: true
+                  char_start:
+                    type: integer
+                  char_end:
+                    type: integer
+          description: "Retrieved and reranked chunks"
+        total_found:
+          type: integer
+          description: "Total chunks matching query before top_k limit"
+        search_time_ms:
+          type: integer
+          description: "Total retrieval + reranking time"
+        strategy_used:
+          type: string
+          enum: [hybrid, vector, keyword]
+      required:
+        - chunks
+        - total_found
+        - search_time_ms
+        - strategy_used
+      additionalProperties: false
+
+    configuration:
+      embedding_model: "intfloat/multilingual-e5-small"
+      embedding_dimension: 384
+      chunk_size: 512
+      chunk_overlap: 50
+      hybrid_alpha: 0.5  # Weight for vector vs keyword (0.5 = equal)
+      rerank_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+      rerank_batch_size: 32
+      qdrant_collection: "documents_chunks"
+      quantization: "scalar"  # int8 quantization for memory efficiency
+
+  synthesizer:
+    name: "Synthesizer"
+    description: "Generates comprehensive answer with citations from retrieved chunks"
+    model: "gpt-4o-mini"  # or claude-3-5-haiku, gemini-1.5-flash
+    temperature: 0.2
+    max_tokens: 2000
+    timeout_seconds: 45
+
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        chunks:
+          type: array
+          items:
+            type: object
+            properties:
+              chunk_id:
+                type: string
+                format: uuid
+              document_id:
+                type: string
+                format: uuid
+              document_filename:
+                type: string
+              chunk_index:
+                type: integer
+              text:
+                type: string
+              score:
+                type: number
+              metadata:
+                type: object
+          maxItems: 10
+          description: "Top reranked chunks from retriever"
+        conversation_history:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [user, assistant]
+              content:
+                type: string
+          maxItems: 10
+        language:
+          type: string
+          enum: [en, ar]
+          default: en
+          description: "Response language"
+      required:
+        - query
+        - chunks
+        - language
+      additionalProperties: false
+
+    output_schema:
+      type: object
+      properties:
+        answer:
+          type: string
+          description: "Complete synthesized answer with inline citation markers [1], [2], etc."
+        citations:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+                description: "Citation number matching inline marker"
+              chunk_id:
+                type: string
+                format: uuid
+              document_id:
+                type: string
+                format: uuid
+              document_filename:
+                type: string
+              chunk_index:
+                type: integer
+              text_snippet:
+                type: string
+                maxLength: 500
+              page_number:
+                type: integer
+                nullable: true
+              relevance_score:
+                type: number
+                minimum: 0
+                maximum: 1
+          description: "Full citation details for each inline reference"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: "Overall confidence in answer accuracy"
+        reasoning:
+          type: string
+          description: "Internal reasoning for answer construction (not shown to user)"
+        language:
+          type: string
+          enum: [en, ar]
+      required:
+        - answer
+        - citations
+        - confidence
+        - language
+      additionalProperties: false
+
+    system_prompt: |
+      You are a Synthesizer Agent for an enterprise AI search system. Your job is to generate accurate, well-cited answers from retrieved document chunks.
+
+      Given a user query and retrieved chunks with relevance scores, you must:
+      1. Synthesize a comprehensive answer addressing the query
+      2. Include inline citations using numbered markers [1], [2], etc.
+      3. Only cite information that appears in the provided chunks
+      4. If chunks contain conflicting information, acknowledge the discrepancy
+      5. If insufficient information exists, clearly state what cannot be answered
+      6. Match the response language to the requested language (English or Arabic)
+
+      Citation Rules:
+      - Every factual claim MUST have a citation
+      - Use the citation index that corresponds to the citations array
+      - Multiple claims from same chunk can share a citation index
+      - Format: "According to the policy [1], employees receive 20 days annual leave [1]."
+
+      Quality Standards:
+      - Be concise but complete
+      - Use professional tone
+      - For Arabic: use proper RTL formatting, formal Arabic (فصحى)
+      - Never hallucinate - if not in chunks, say "I don't have information about..."
+
+      Output ONLY valid JSON matching the schema.
+
+orchestrator:
+  name: "Orchestrator"
+  description: "Coordinates the multi-agent pipeline with error handling and retries"
+  timeout_seconds: 120
+  max_retries: 2
+  retry_delay_seconds: 2
+
+  flow:
+    - step: researcher
+      depends_on: []
+      retry_on_failure: true
+      fallback:
+        # If researcher fails, use simple keyword extraction
+        sub_queries: ["{{query}}"]
+        search_strategy: "hybrid"
+        filters: {}
+        confidence: 0.5
+
+    - step: retriever
+      depends_on: [researcher]
+      retry_on_failure: true
+      fallback:
+        # If retriever fails, return empty results
+        chunks: []
+        total_found: 0
+        search_time_ms: 0
+        strategy_used: "hybrid"
+
+    - step: synthesizer
+      depends_on: [researcher, retriever]
+      retry_on_failure: true
+      fallback:
+        # If synthesizer fails, return error message
+        answer: "I apologize, but I encountered an error generating the answer. Please try again."
+        citations: []
+        confidence: 0
+        reasoning: "Synthesizer agent failed after retries"
+
+  streaming:
+    enabled: true
+    token_by_token: true
+    citation_events: true
+    heartbeat_interval_ms: 5000

@@ -1,0 +1,277 @@
+# Additive contract for spec 004 (accounts, sessions and Postgres).
+# Applies on top of specs/001-employee-ai-search-platform/contracts/openapi.yaml
+# and specs/003-byok-llm/contracts/openapi.delta.yaml.
+openapi: 3.1.0
+info:
+  title: Employee AI Search Platform — accounts delta
+  version: 1.2.0
+
+tags:
+  - name: Auth
+    description: Accounts, guest sessions and cookie-based authentication
+
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: eais_session
+      description: |
+        Opaque server-side session token. HttpOnly, SameSite=Lax, Secure in
+        production. Unsafe methods also require `X-CSRF-Token`.
+
+  parameters:
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      description: |
+        Required for unsafe methods (POST/PUT/PATCH/DELETE) when the request is
+        authenticated by the session cookie. The value is the readable
+        `eais_csrf` cookie. API-key requests are exempt.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+
+  schemas:
+    AuthUser:
+      type: object
+      required: [id, email, role, is_guest, created_at]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [viewer, user, admin]
+        display_name:
+          type: string
+          nullable: true
+        is_guest:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AuthResponse:
+      type: object
+      required: [user, csrf_token]
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        csrf_token:
+          type: string
+          description: Mirrors the readable `eais_csrf` cookie.
+
+    MeResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          minLength: 8
+          maxLength: 200
+
+    RegisterRequest:
+      allOf:
+        - $ref: '#/components/schemas/LoginRequest'
+        - type: object
+          required: [invite_code]
+          properties:
+            invite_code:
+              type: string
+              maxLength: 200
+            display_name:
+              type: string
+              maxLength: 80
+
+    CreateUserRequest:
+      allOf:
+        - $ref: '#/components/schemas/LoginRequest'
+        - type: object
+          properties:
+            role:
+              type: string
+              enum: [viewer, user, admin]
+              default: user
+            display_name:
+              type: string
+              maxLength: 80
+
+paths:
+  /api/v1/auth/demo:
+    post:
+      tags: [Auth]
+      summary: Create a guest session
+      description: |
+        Creates a short-lived viewer account and session so a first-time visitor
+        can chat without signing up. Returns `403` when
+        `DEMO_LOGIN_ENABLED=false`.
+      operationId: authDemo
+      security: []
+      responses:
+        '200':
+          description: Guest session created; both cookies are set
+          headers:
+            Set-Cookie:
+              schema:
+                type: array
+                items:
+                  type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '403':
+          description: Guest sessions are disabled
+        '429':
+          description: Auth bucket exhausted
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Create an account with an invite code
+      operationId: authRegister
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: Account created; session cookies are set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Malformed email, short password, or invalid role
+        '403':
+          description: Registration is closed or the invite code is wrong
+        '409':
+          description: The email is already registered
+        '429':
+          description: Auth bucket exhausted
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in with email and password
+      description: |
+        Failures always return the same generic `401` message, whether the email
+        is unknown, the password is wrong, or the account is deactivated.
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Signed in; session cookies are set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid email or password
+        '429':
+          description: Auth bucket exhausted
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Sign out this browser
+      description: Deletes the session row when a cookie is present and clears both cookies. Idempotent.
+      operationId: authLogout
+      security: []
+      responses:
+        '204':
+          description: Signed out (or already signed out)
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current principal
+      operationId: authMe
+      security:
+        - SessionCookie: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: The authenticated principal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/auth/users:
+    post:
+      tags: [Auth]
+      summary: Create an account with an explicit role (admin only)
+      operationId: authCreateUser
+      security:
+        - SessionCookie: []
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '400':
+          description: Malformed email, short password, or invalid role
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Admin role required, or CSRF missing/mismatched
+        '409':
+          description: The email is already registered
+
+  /api/v1/health:
+    get:
+      responses:
+        '200':
+          description: |
+            Adds an `auth` check: `demo` (guest sessions), `registration`
+            (invite code configured) and `database` engine (`sqlite` or
+            `postgres`). No secret is reported.

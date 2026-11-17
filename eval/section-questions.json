@@ -1,0 +1,28 @@
+{
+  "name": "final.docx — section-title questions (heading → section body)",
+  "document": "final.docx",
+  "notes": "Each question is the exact title of a numbered section. The answer lives in the paragraphs under the heading, so a hit means the section body was retrieved, not the heading line or a figure caption. Kept separate from thesis-questions.json so the 28-question baseline is unchanged.",
+  "questions": [
+    {
+      "id": "sec01",
+      "question": "تنفيذ مرحلة التعرف على الوجه",
+      "language": "ar",
+      "retrieval_terms": ["target_embedding"],
+      "answer_terms": ["target_embedding", "0.32", "buffalo_l"]
+    },
+    {
+      "id": "sec02",
+      "question": "تحليل ثغرة نفاد المحاولات",
+      "language": "ar",
+      "retrieval_terms": ["attempts_left"],
+      "answer_terms": ["attempts_left", "normal_mode"]
+    },
+    {
+      "id": "sec03",
+      "question": "نتائج الاختبارات المحلية",
+      "language": "ar",
+      "retrieval_terms": ["خمس عشرة"],
+      "answer_terms": ["خمس عشرة", "أربع عشرة", "15", "14"]
+    }
+  ]
+}

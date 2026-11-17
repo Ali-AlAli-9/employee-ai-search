@@ -1,0 +1,102 @@
+# Additive contract for spec 003 (Bring-Your-Own-Key LLM).
+# Applies on top of specs/001-employee-ai-search-platform/contracts/openapi.yaml.
+openapi: 3.1.0
+info:
+  title: Employee AI Search Platform — BYOK delta
+  version: 1.1.0
+
+components:
+  parameters:
+    LlmApiKey:
+      name: X-LLM-API-Key
+      in: header
+      required: false
+      description: |
+        Visitor-supplied provider key. Used for this request only; never
+        persisted or logged. Omit it to use the server key (administrators
+        only) or the heuristic answerer.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    LlmModel:
+      name: X-LLM-Model
+      in: header
+      required: false
+      description: Model id for the supplied key. Defaults to the server's `LLM_MODEL`.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9._:/@+-]{1,120}$'
+    LlmBaseUrl:
+      name: X-LLM-Base-URL
+      in: header
+      required: false
+      description: OpenAI-compatible base URL; must match `LLM_ALLOWED_BASE_URLS`.
+      schema:
+        type: string
+        format: uri
+
+paths:
+  /api/v1/chat:
+    post:
+      parameters:
+        - $ref: '#/components/parameters/LlmApiKey'
+        - $ref: '#/components/parameters/LlmModel'
+        - $ref: '#/components/parameters/LlmBaseUrl'
+      responses:
+        '400':
+          description: Malformed key/model or a base URL outside the allow-list
+        '403':
+          description: BYOK is disabled on this deployment
+
+  /api/v1/llm/verify:
+    post:
+      tags: [LLM]
+      summary: Check a visitor-supplied provider key
+      description: |
+        Calls the provider's `/models` route (or a single-token completion when
+        that route does not exist) and reports whether the credential works.
+        The key is never echoed back.
+      operationId: verifyLlmKey
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LlmApiKey'
+        - $ref: '#/components/parameters/LlmModel'
+        - $ref: '#/components/parameters/LlmBaseUrl'
+      responses:
+        '200':
+          description: Key accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, provider, model, checked]
+                properties:
+                  ok:
+                    type: boolean
+                  provider:
+                    type: string
+                  model:
+                    type: string
+                  checked:
+                    type: string
+                    enum: [models, completion]
+                  models:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Malformed headers, disallowed base URL, or provider rejected the key
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: BYOK is disabled on this deployment
+        '429':
+          description: Provider quota reached, or the verification bucket is exhausted
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+        '502':
+          description: Provider unreachable

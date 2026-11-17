@@ -1,0 +1,210 @@
+openapi: 3.0.3
+info:
+  title: Employee AI Search API — spec 005 delta
+  version: 1.5.0
+  description: |
+    Additive changes for Supabase Auth and user administration. Everything in
+    specs 001–004 remains valid; `X-API-Key` keeps working and is exempt from
+    CSRF. Cookie-authenticated unsafe methods still require `X-CSRF-Token`
+    matching the readable `eais_csrf` cookie.
+
+paths:
+  /api/v1/auth/login:
+    post:
+      summary: Sign in through Supabase
+      description: |
+        When `AUTH_PROVIDER=supabase`, credentials are verified by GoTrue. Sets
+        `eais_access` and `eais_refresh` (HttpOnly) plus `eais_csrf` (readable).
+        Errors are generic to avoid account enumeration.
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401": { description: Invalid email or password }
+
+  /api/v1/auth/demo:
+    post:
+      summary: Guest session (anonymous Supabase user)
+      description: |
+        Requires anonymous sign-ins to be enabled on the Supabase project.
+      responses:
+        "200":
+          description: Guest signed in with role viewer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "403": { description: "Guest sessions are disabled" }
+
+  /api/v1/auth/users:
+    get:
+      summary: List accounts
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: "Case-insensitive email or display-name search" }
+        - { name: include_guests, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: Page of accounts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserPage" }
+        "403": { description: Admin role required }
+    post:
+      summary: Create an account with an explicit role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/AdminUser" }
+        "409": { description: Email already exists }
+
+  /api/v1/auth/password-reset:
+    post:
+      summary: Complete a password recovery
+      description: |
+        Public by design: the short-lived access token from the recovery email
+        *is* the credential. The server forwards it once to GoTrue
+        (`PUT /user`) and stores/logs neither the token nor the password.
+        Rate limited with the other `/auth/*` routes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordResetRequest" }
+      responses:
+        "204": { description: Password changed }
+        "400": { description: Weak password, or the link is invalid/expired }
+        "429": { description: Rate limited }
+        "501": { description: Not available in local mode }
+
+  /api/v1/auth/users/sync:
+    post:
+      summary: Pull accounts from Supabase into the local profile index
+      responses:
+        "200":
+          description: Sync summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  synced: { type: integer }
+        "503": { description: Admin API not configured }
+
+  /api/v1/auth/users/{user_id}:
+    patch:
+      summary: Change a role or enable/disable an account
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string, enum: [viewer, user, admin] }
+                is_active: { type: boolean }
+              minProperties: 1
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/AdminUser" }
+        "409":
+          description: Refused — self-demotion, self-deactivation, or last active admin
+    delete:
+      summary: Delete a guest account
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+        "409": { description: Only guest accounts can be deleted here }
+
+  /api/v1/auth/users/{user_id}/password-reset:
+    post:
+      summary: Send a password-reset email
+      description: |
+        Always `202` so the endpoint cannot be used to discover accounts.
+        Returns `501` when `AUTH_PROVIDER=local` (no email transport).
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "202": { description: Reset requested }
+        "501": { description: Not available in local mode }
+
+components:
+  schemas:
+    AuthUser:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string, nullable: true }
+        role: { type: string, enum: [viewer, user, admin] }
+        display_name: { type: string, nullable: true }
+        is_guest: { type: boolean }
+        created_at: { type: string, nullable: true }
+        last_login_at: { type: string, nullable: true }
+
+    AdminUser:
+      allOf:
+        - $ref: "#/components/schemas/AuthUser"
+        - type: object
+          properties:
+            is_active: { type: boolean }
+            last_sign_in_at: { type: string, nullable: true }
+
+    AuthResponse:
+      type: object
+      required: [user, csrf_token]
+      properties:
+        user: { $ref: "#/components/schemas/AuthUser" }
+        csrf_token:
+          type: string
+          description: Mirrors the readable `eais_csrf` cookie.
+
+    UserPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AdminUser" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        provider: { type: string, enum: [local, supabase] }
+
+    PasswordResetRequest:
+      type: object
+      required: [access_token, password]
+      properties:
+        access_token:
+          type: string
+          description: Access token from the recovery email fragment.
+        password:
+          type: string
+          minLength: 8
+          maxLength: 200
+
+  securitySchemes:
+    ApiKey: { type: apiKey, in: header, name: X-API-Key }
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: eais_access

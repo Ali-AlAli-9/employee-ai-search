@@ -1,0 +1,13 @@
+# Keep the build context small: only backend/ is needed by the root Dockerfile.
+.git
+.github
+.gitignore
+frontend
+eval
+specs
+sample-data
+**/__pycache__
+**/*.pyc
+.pytest_cache
+backend/data
+backend/tests

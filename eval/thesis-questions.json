@@ -1,0 +1,199 @@
+{
+  "name": "final.docx (smart safe thesis) — Arabic/English retrieval benchmark",
+  "document": "final.docx",
+  "notes": "retrieval_terms identify chunks that contain the fact; answer_terms are accepted answers. Unanswerable questions must produce an abstention, not a citation.",
+  "questions": [
+    {
+      "id": "q01",
+      "question": "ما العتبة المستخدمة لقبول تشابه الوجه في النظام؟",
+      "language": "ar",
+      "retrieval_terms": ["0.32"],
+      "answer_terms": ["0.32"]
+    },
+    {
+      "id": "q02",
+      "question": "كم إطاراً يحلل النظام في مرحلة التعرف على الوجه؟",
+      "language": "ar",
+      "retrieval_terms": ["إطار خامس"],
+      "answer_terms": ["خامس", "خمسة"]
+    },
+    {
+      "id": "q03",
+      "question": "ما اسم حزمة نموذج InsightFace المستخدمة؟",
+      "language": "ar",
+      "retrieval_terms": ["buffalo_l"],
+      "answer_terms": ["buffalo_l"]
+    },
+    {
+      "id": "q04",
+      "question": "ما اسم الملف الذي تُحمَّل منه البصمة المرجعية للوجه؟",
+      "language": "ar",
+      "retrieval_terms": ["target_embedding.npy"],
+      "answer_terms": ["target_embedding"]
+    },
+    {
+      "id": "q05",
+      "question": "ما مدة تثبيت الإشارة قبل تسجيل رقم من أرقام كلمة المرور؟",
+      "language": "ar",
+      "retrieval_terms": ["ثانيتين"],
+      "answer_terms": ["ثانيتين", "2.0"]
+    },
+    {
+      "id": "q06",
+      "question": "ما الأمر الذي يُرسل إلى Arduino عند إدخال كلمة مرور خاطئة؟",
+      "language": "ar",
+      "retrieval_terms": ["ERROR"],
+      "answer_terms": ["ERROR"]
+    },
+    {
+      "id": "q07",
+      "question": "ما زاوية محرك السيرفو عند تنفيذ أمر الفتح؟",
+      "language": "ar",
+      "retrieval_terms": ["180"],
+      "answer_terms": ["180"]
+    },
+    {
+      "id": "q08",
+      "question": "ما زاوية السيرفو ومدة فصل الريليه عند تنفيذ أمر الإغلاق؟",
+      "language": "ar",
+      "retrieval_terms": ["2000"],
+      "answer_terms": ["80", "2000"]
+    },
+    {
+      "id": "q09",
+      "question": "كم عدد حالات الاختبار المحلية التي نُفذت وكم منها نجح؟",
+      "language": "ar",
+      "retrieval_terms": ["خمس عشرة"],
+      "answer_terms": ["خمس عشرة", "أربع عشرة", "15", "14"]
+    },
+    {
+      "id": "q10",
+      "question": "أي حالة اختبار لم تنجح وما سبب فشلها؟",
+      "language": "ar",
+      "retrieval_terms": ["نفاد المحاولات"],
+      "answer_terms": ["نفاد المحاولات", "attempts_left", "normal_mode"]
+    },
+    {
+      "id": "q11",
+      "question": "ما الإيماءة المستخدمة لإغلاق الخزنة؟",
+      "language": "ar",
+      "retrieval_terms": ["جميع أصابع اليدين"],
+      "answer_terms": ["جميع أصابع اليدين", "CLOSE"]
+    },
+    {
+      "id": "q12",
+      "question": "ما الإيماءة المستخدمة لإعادة ضبط النظام؟",
+      "language": "ar",
+      "retrieval_terms": ["الإبهامين"],
+      "answer_terms": ["الإبهامين", "الإبهامان", "ERROR"]
+    },
+    {
+      "id": "q13",
+      "question": "ما مكتبة الواجهة الرسومية المستخدمة في المشروع؟",
+      "language": "ar",
+      "retrieval_terms": ["Tkinter"],
+      "answer_terms": ["Tkinter"]
+    },
+    {
+      "id": "q14",
+      "question": "ما المكتبة المستخدمة لاكتشاف اليدين وعد الأصابع المرفوعة؟",
+      "language": "ar",
+      "retrieval_terms": ["MediaPipe Hands"],
+      "answer_terms": ["MediaPipe"]
+    },
+    {
+      "id": "q15",
+      "question": "ما جهد القفل الكهرومغناطيسي المستخدم في الخزنة؟",
+      "language": "ar",
+      "retrieval_terms": ["12 فولت"],
+      "answer_terms": ["12 فولت", "12V", "12"]
+    },
+    {
+      "id": "q16",
+      "question": "على أي منفذ تسلسلي وبأي سرعة يتصل برنامج Python بلوحة Arduino؟",
+      "language": "ar",
+      "retrieval_terms": ["COM5"],
+      "answer_terms": ["COM5", "9600"]
+    },
+    {
+      "id": "q17",
+      "question": "ما نوع بطارية دارة التغذية في المشروع؟",
+      "language": "ar",
+      "retrieval_terms": ["ليثيوم"],
+      "answer_terms": ["ليثيوم", "Lithium"]
+    },
+    {
+      "id": "q18",
+      "question": "ما التطوير المستقبلي المقترح لمنع خداع النظام بصورة مطبوعة أو شاشة؟",
+      "language": "ar",
+      "retrieval_terms": ["كشف الحيوية"],
+      "answer_terms": ["كشف الحيوية", "Liveness"]
+    },
+    {
+      "id": "q19",
+      "question": "كم عدد المستخدمين الذين يدعمهم النموذج الحالي؟",
+      "language": "ar",
+      "retrieval_terms": ["مستخدم واحد"],
+      "answer_terms": ["مستخدم واحد", "بصمة وجه واحدة"]
+    },
+    {
+      "id": "q20",
+      "question": "ما اسم الدالة المسؤولة عن إرسال أمر الفتح إلى Arduino؟",
+      "language": "ar",
+      "retrieval_terms": ["unlock_safe"],
+      "answer_terms": ["unlock_safe", "OPEN"]
+    },
+    {
+      "id": "q21",
+      "question": "What face similarity threshold does the system use?",
+      "language": "en",
+      "retrieval_terms": ["0.32"],
+      "answer_terms": ["0.32"]
+    },
+    {
+      "id": "q22",
+      "question": "How many local test cases were executed and how many passed?",
+      "language": "en",
+      "retrieval_terms": ["fifteen", "خمس عشرة"],
+      "answer_terms": ["fifteen", "fourteen", "15", "14", "خمس عشرة", "أربع عشرة"]
+    },
+    {
+      "id": "q23",
+      "question": "Which library detects hands and counts raised fingers?",
+      "language": "en",
+      "retrieval_terms": ["MediaPipe Hands"],
+      "answer_terms": ["MediaPipe"]
+    },
+    {
+      "id": "q24",
+      "question": "Which command opens the safe?",
+      "language": "en",
+      "retrieval_terms": ["unlock_safe", "Relay ON"],
+      "answer_terms": ["OPEN"]
+    },
+    {
+      "id": "q25",
+      "question": "كم عدد أيام الإجازة السنوية للموظفين؟",
+      "language": "ar",
+      "unanswerable": true
+    },
+    {
+      "id": "q26",
+      "question": "What is the CEO's annual salary?",
+      "language": "en",
+      "unanswerable": true
+    },
+    {
+      "id": "q27",
+      "question": "ما هي سياسة العمل عن بُعد في الشركة؟",
+      "language": "ar",
+      "unanswerable": true
+    },
+    {
+      "id": "q28",
+      "question": "ما سعر البيتكوين اليوم؟",
+      "language": "ar",
+      "unanswerable": true
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+services:
+  - type: web
+    name: employee-ai-search-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/v1/health/ready
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATA_DIR
+        value: /tmp/data
+      - key: EMBEDDING_BACKEND
+        # Offline hashing vectors + BM25; no model download and no second
+        # service. The LLM (server key or BYOK) produces the cited answer.
+        value: hashing
+      - key: EMBEDDING_DIMENSION
+        value: "384"
+      - key: CORS_ORIGINS
+        # The browser normally uses the same-origin Next.js proxy; this origin
+        # is only needed if NEXT_PUBLIC_API_URL points straight at this API.
+        value: https://employee-ai-search-web.onrender.com
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: USER_API_KEY
+        sync: false
+      - key: VIEWER_API_KEY
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.openai.com/v1
+      - key: LLM_MODEL
+        value: gpt-4o-mini
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      # Supabase Auth & Postgres (durable, survives redeploys). Set these in the
+      # Render dashboard for each service.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        # Optional: only for legacy HS256 projects. ES256 projects are verified
+        # through JWKS derived from SUPABASE_URL.
+        sync: false
+      - key: SUPABASE_JWKS_URL
+        sync: false
+      - key: SUPABASE_TIMEOUT_SECONDS
+        value: "15"
+      - key: SUPABASE_SYNC_MAX_PAGES
+        value: "10"
+      - key: PASSWORD_RESET_REDIRECT_TO
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: INVITE_CODE
+        # Leave empty for public sign-up; set a shared code for invite-only.
+        sync: false
+      - key: DEMO_LOGIN_ENABLED
+        value: "true"
+      - key: SESSION_SECURE
+        value: "true"
+
+  - type: web
+    name: employee-ai-search-web
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    envVars:
+      - key: BACKEND_URL
+        value: https://employee-ai-search-api.onrender.com
+
+# No Render-managed database: Supabase Postgres (via DATABASE_URL) provides
+# durable storage for documents, chunks, queries, traces and the profiles index.

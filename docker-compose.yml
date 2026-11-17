@@ -1,0 +1,56 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATA_DIR: /app/data
+      ENVIRONMENT: development
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
+      USER_API_KEY: ${USER_API_KEY:-dev-user-key}
+      VIEWER_API_KEY: ${VIEWER_API_KEY:-dev-viewer-key}
+      # Accounts: set these in a local .env to sign in as the operator.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-please}
+      INVITE_CODE: ${INVITE_CODE:-}
+      DEMO_LOGIN_ENABLED: ${DEMO_LOGIN_ENABLED:-true}
+      SESSION_SECURE: "false"
+      # Supabase Auth & Postgres (optional locally; local provider is the default).
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
+      SUPABASE_TIMEOUT_SECONDS: ${SUPABASE_TIMEOUT_SECONDS:-15}
+      SUPABASE_SYNC_MAX_PAGES: ${SUPABASE_SYNC_MAX_PAGES:-10}
+      DATABASE_URL: ${DATABASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-hashing}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    volumes:
+      - backend_data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - backend
+
+volumes:
+  backend_data:
